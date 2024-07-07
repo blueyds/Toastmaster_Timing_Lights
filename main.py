@@ -4,8 +4,26 @@ from time import sleep_ms
 import utime
 import _thread
 
+
+#INITIALIZE PINS 
+
+#Setup pins for LCD Display
+i2c = I2C(1, scl=Pin(7), sda=Pin(6))
+
+#Setup the inputs and outputs being used for keypad
+R1 = machine.Pin(22,machine.Pin.OUT)
+R2 = machine.Pin(21,machine.Pin.OUT)
+R3 = machine.Pin(10,machine.Pin.OUT)
+R4 = machine.Pin(11,machine.Pin.OUT)
+C1 = machine.Pin(12,machine.Pin.IN,machine.Pin.PULL_DOWN)
+C2 = machine.Pin(13,machine.Pin.IN,machine.Pin.PULL_DOWN)
+C3 = machine.Pin(15,machine.Pin.IN,machine.Pin.PULL_DOWN)
+C4 = machine.Pin(14,machine.Pin.IN,machine.Pin.PULL_DOWN)
+
+
 #STOPWATCH FUNCTIONS BEGIN
 class stopwatch:
+    #State constants defined for this class
     IDLE = 1
     STARTED = 2
     toGREEN = 3
@@ -58,7 +76,7 @@ class stopwatch:
             
     def stop(self):
         self.running = False
-        
+    
     def mmss(self):
         seconds = (self.last_ms - self.start_ms) * 0.001
         minutes = 0
@@ -83,17 +101,8 @@ class stopwatch:
         return f"{self.state_str()} == {mm[0]:0>2}:{mm[1]:0>2.0f}"
 #STOPWATCH FUNCTIONS END
 
-#KEYPAD FUNCTIONS BEGIN
+#KEYPAD FUNCTIONS BEGIN /
 
-#Setup the inputs and outputs being used
-R1 = machine.Pin(22,machine.Pin.OUT)
-R2 = machine.Pin(21,machine.Pin.OUT)
-R3 = machine.Pin(10,machine.Pin.OUT)
-R4 = machine.Pin(11,machine.Pin.OUT)
-C1 = machine.Pin(12,machine.Pin.IN,machine.Pin.PULL_DOWN)
-C2 = machine.Pin(13,machine.Pin.IN,machine.Pin.PULL_DOWN)
-C3 = machine.Pin(15,machine.Pin.IN,machine.Pin.PULL_DOWN)
-C4 = machine.Pin(14,machine.Pin.IN,machine.Pin.PULL_DOWN)
 
 User_Key = "null" 			#User pressed key is set in the thread
                             #can be read in main loop
@@ -454,39 +463,107 @@ class I2cLcd(LcdApi):
 
 #Normal program begins
 
+#Preset class
+class Preset:
+    def __init__(self, keypad_number, min_minutes, max_minutes, desc):
+        self.key = keypad_number
+        self.green_m = min_minutes
+        self.red_m = max_minutes
+        self.description = desc
+
+presets = [
+    Preset(1,1,2,"Table Topics 1-2"),
+    Preset(2,2,3,"Evaluation 2-3  "),
+    Preset(3,3,5,"Speech 3-5.     "),
+    Preset(4,4,6,"Ice Breaker 4-6 "),
+    Preset(5,5,7,"Speech 5-7      "),
+    Preset(6,5,7,"Speech 5-7      "),
+    Preset(7,5,7,"Speech 5-7      "),
+    Preset(8,5,7,"Speech 5-7      "),
+    Preset(9,5,7,"Speech 5-7      ")
+    ]
+
+preset_index = 99
+
 #initializei the stopwatch so we can do timers
 myTimer = stopwatch()
 
 #Print Status function
+
+IDLE = 1
+TO_TIMER_ON = 2
+TIMER_ON = 3
+TO_TIMER_OFF = 4
+TIMER_OFF = 5
+ENTER_PROG = 7
+PRESET = 9
+
+
+
+#This runs the keyboard in a continual separate thread.
+_thread.start_new_thread(Keyboard_Scanner,())	        
+
+app_state = IDLE
+#Initialize the LCD Display
+addr = i2c.scan()
+
+def IsNumber(key_code):
+    if (key_code == "0"): return 0
+    if (key_code == "1"): return 1
+    if (key_code == "2"): return 2
+    if (key_code == "3"): return 3
+    if (key_code == "4"): return 4
+    if (key_code == "5"): return 5
+    if (key_code == "6"): return 6
+    if (key_code == "7"): return 7
+    if (key_code == "8"): return 8
+    if (key_code == "9"): return 9
+    return 99
+
 last_line1 = ""
 last_line2 = ""
+digits = ["0","0","0","0"]
+processed_digits = [0,0,0,0]
+next_digit = 0
+green = 1000
+red = 1000
 
 def Print_Status():
     global last_line1
     global last_line2
     line1 = "Speech Timer    "
-    line2 = myTimer.timer_as_str()
+    line2 = last_line2
+    if (app_state == TIMER_ON) or (app_state == TIMER_OFF):
+        line2 = myTimer.timer_to_str()
+        last_line2 = line2
+    if (app_state == IDLE):
+        line2 = "Press Start     "
+        last_line2 = line2
+    if (app_state == PRESET):
+        line1 = "Preset         ", preset_index + 1
+        line2 = preset[index].description
+        app_state = PRESET
+    if (app_state == ENTER_PROG):
+        line1 = "Green minutes ",digits[0],digits[1]
+        line2 = "Red minutes   ",digits[2], digits[3]
     if (line1 != last_line1) or (line2 != last_line2):
         lcd.clear()
         lcd.putstr(line1)
         lcd.putstr(line2)
         last_line1 = line1
         last_line2 = line2
-    
-#This runs the keyboard in a continual separate thread.
-_thread.start_new_thread(Keyboard_Scanner,())	        
 
-#Initialize the LCD Display
-i2c = I2C(1, scl=Pin(7), sda=Pin(6), freq=400000)
-addr = i2c.scan()
-      
 lcd = I2cLcd(i2c, addr[0], 2, 16)
 
-myTimer.start(5, 7)
 last_time = 0
+
 while True:
-    myTimer.tick()
-   
+    if  (app_state == TO_TIMER_ON):
+        myTimer.start(green,red)
+        app_state = TIMER_ON
+    if (app_state == TO_TIMER_OFF):
+        myTimer.stop()
+        app_state = TIMER_OFF
     if myTimer.state == stopwatch.toGREEN:
         print("I Caught the green transition. i can turn onlinghts")
     if myTimer.state == stopwatch.toYELLOW:
@@ -494,10 +571,69 @@ while True:
     if myTimer.state == stopwatch.toRED:
         print("I caught the red transition. CUT IT OUT")
     
-    #check for keypad
+#check for keypad
     if User_Key != "null":
         Key_Code = User_Key
         User_Key = "null"
-        print("Key Code =",Key_Code)
+    #    print("Key Code =",Key_Code)
+    #User pressed start B= Start
+        if (Key_Code == "B"):
+            if (app_state == PRESET):
+                green = presets[preset_index].green_m
+                red = presets[preset_index].red_m
+            if (app_state == ENTER_PROG):
+                green = processed_digits[0] * 10 + processed_digits[1]
+                red = processed_digits[2] * 10 + processed_digits[3]
+            app_state = TO_TIMER_ON
+            
+    #USer pressed stop C=Stop
+        else if (Key_Code == "C"):
+            green = 1000
+            red = 1000
+            app_state = TO_TIMER_OFF
+    #User pressed preset
+        else if (Key_Code == "A"):
+            #if timer is on we do not want to interupt
+            if (app_state != TIMER_ON): 
+                app_state = PRESET
+                preset_index = 0
+    #User pressed enter
+        else if (Key_Code == "D"):
+            if (app_state != TIMER_ON)
+                app_state = TO_ENTER_PROG
+        
+    #User pressed up
+        else if (Key_Code == "*"):
+            #we only want to cycle if we are in the preset loop
+            if (app_state == PRESET):
+                #if cycle is at the top then go back to first
+                if (preset_index < 9):
+                    preset_index = preset_index + 1
+                else:
+                    preset_index = 0
+        
+    #User pressed down
+        else if (Key_Code == "#"):
+            if (app_state == PRESET):
+                #if cyce is at bottom then go back to last
+                if (preset_index > 0):
+                    preset_index = preset_index - 1
+                else:
+                    preset_index = 9
+    #User pressed a digit      
+        else: 
+            digit = toNumber(Key_Code)
+            #just a check to make sure we have a number
+            if (IsNumber(Key_Code) < 10 ):
+                #if preset then just change the current preset index
+                if (app_state == PRESET):
+                    preset_index = digit - 1
+                #if custom prog then update prog digits
+                #default behavior will cycle through all digits until we start
+                if (app_state == ENTER_PROG):
+                    if (next_digit > 3):
+                        next_digit = 0
+                    digits[next_digit] = Key_Code
+                    processed_digits[next_digit] = digit
     Print_Status()
     sleep_ms(100)
